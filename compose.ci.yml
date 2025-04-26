@@ -198,8 +198,8 @@ services:
         go build -o /tmp/analyzer main.go
         
         # Run the compiled analyzer binary on the target file
-        /tmp/analyzer /cracker-runner/main.go > /reports/code-analysis-report.txt
-        echo "📊 Code analysis completed. Report saved to /reports/code-analysis-report.txt"
+        /tmp/analyzer /cracker-runner/main.go > /reports/code-analysis-report.md
+        echo "📊 Code analysis completed. Report saved to /reports/code-analysis-report.md"
 
     volumes:
       - ./analyze:/analyze

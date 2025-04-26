@@ -2,7 +2,7 @@
 
 <details open="true"><summary>:package: Image Reference</strong> <code>hello-wasm-function:demo</code></summary>
 <table>
-<tr><td>digest</td><td><code>sha256:1cab0d8289178299fec0b5f0ae254f286a104c1815c526b3e7bd167e6774ada3</code></td><tr><tr><td>vulnerabilities</td><td><img alt="critical: 1" src="https://img.shields.io/badge/critical-1-8b1924"/> <img alt="high: 0" src="https://img.shields.io/badge/high-0-lightgrey"/> <img alt="medium: 0" src="https://img.shields.io/badge/medium-0-lightgrey"/> <img alt="low: 0" src="https://img.shields.io/badge/low-0-lightgrey"/> <!-- unspecified: 0 --></td></tr>
+<tr><td>digest</td><td><code>sha256:34dc80e20c7f7abc018e4c9d60aeb22dc7ee7ac766d81724d794b5c29b1f8f9f</code></td><tr><tr><td>vulnerabilities</td><td><img alt="critical: 1" src="https://img.shields.io/badge/critical-1-8b1924"/> <img alt="high: 0" src="https://img.shields.io/badge/high-0-lightgrey"/> <img alt="medium: 0" src="https://img.shields.io/badge/medium-0-lightgrey"/> <img alt="low: 0" src="https://img.shields.io/badge/low-0-lightgrey"/> <!-- unspecified: 0 --></td></tr>
 <tr><td>platform</td><td>linux/arm64</td></tr>
 <tr><td>size</td><td>4.1 MB</td></tr>
 <tr><td>packages</td><td>10</td></tr>
