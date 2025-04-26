@@ -1,0 +1,210 @@
+# Compose CI pipeline
+x-documentation: >
+  # Compose CI:
+
+  ## Requirements
+
+  ## Start the CI pipeline
+
+  ```bash
+  docker compose -f compose.ci.yml up --build
+  ```
+  > you can even use the watch mode to test and debug your CI pipeline.
+
+  ## About variable interpolation
+
+  - https://docs.docker.com/reference/compose-file/interpolation/
+
+
+
+services:
+
+  # Build the wasm file using tinygo
+  build-go-plugin:
+    image: tinygo/tinygo:0.37.0
+    environment:
+      - ABOUT=${ABOUT}
+      - AUTHOR=${AUTHOR}
+    command: 
+      - /bin/sh
+      - -c
+      - |  
+        go version
+        tinygo version
+        echo "✋ about: ${ABOUT}, by ${AUTHOR}"
+        cd /go-plugin
+        go mod download
+        tinygo build \
+          -scheduler=none \
+          --no-debug \
+          -o /build/plugin.wasm \
+          -target wasi main.go
+        echo "📦 plugin.wasm built at /build/plugin.wasm"
+      
+    volumes:
+      - ./plugins/go-plugin:/go-plugin
+      - ./build:/build
+      - ./reports:/reports
+
+  build-cracker-runner:
+    image: golang:1.24.0-alpine
+    environment:
+      - TARGETOS=${TARGETOS:-darwin}
+      - TARGETARCH=${TARGETARCH:-arm64}
+    command:
+      - /bin/sh
+      - -c
+      - |  
+        echo "📦 building cracker runner on $${TARGETOS}/$${TARGETARCH}"
+        cd /cracker-runner
+        go mod download
+        CGO_ENABLED=0 GOOS=$${TARGETOS} GOARCH=$${TARGETARCH} go build \
+        -ldflags="-s -w" \
+        -o /build/cracker-runner-$${TARGETOS}-$${TARGETARCH} main.go
+        chmod +x /build/cracker-runner-$${TARGETOS}-$${TARGETARCH}
+        echo "📦 cracker runner built at /build/cracker-runner-$${TARGETOS}-$${TARGETARCH}"
+      
+    volumes:
+      - ./cracker-runner:/cracker-runner
+      - ./build:/build
+      - ./reports:/reports
+
+  # Create a multi architecture image with the wasm file and the extism-runner
+  build-local-image:      
+    image: hello-wasm-function:${TAG}
+    environment:
+      - TAG=${TAG}
+    build:
+      context: .
+      platforms:
+        - "linux/amd64"
+        - "linux/arm64"
+      dockerfile: Dockerfile
+      args:
+        GO_VERSION: 1.24.0
+        TINYGO_VERSION: 0.37.0
+        PLUGIN_PATH: /plugins/go-plugin
+        RUNNER_PATH: /cracker-runner
+        
+    command: ["/cracker-runner"] # hack because I use a scratch image
+    depends_on: 
+      build-cracker-runner:
+        condition: service_completed_successfully
+      build-go-plugin:
+        condition: service_completed_successfully
+
+  # Scan the image for vulnerabilities
+  image-vulnerability-scan:
+    image: docker/scout-cli
+    user: root  # Required to access Docker socket
+    environment:
+      # Your Docker Hub username
+      - DOCKER_SCOUT_HUB_USER=${DOCKER_HUB_USERNAME}
+      # Your Docker Hub Personal Access Token (PAT)
+      - DOCKER_SCOUT_HUB_PASSWORD=${DOCKER_HUB_PAT}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
+      - ./reports:/reports
+    command: 
+      - "cves"
+      #- "--exit-code" 
+      - "hello-wasm-function:${TAG}"
+      - "--format"
+      - "markdown"
+      - "--output"
+      - "/reports/cves-report.md"
+
+      # `--exit-code`  generates exit code 2 if vulnerabilities are found
+    tty: true
+    depends_on:
+      build-local-image:
+        condition: service_completed_successfully
+  
+
+  # Deploy the function (locally)
+  start-function:
+    image: hello-wasm-function:${TAG}
+    environment:
+      - TAG=${TAG}
+    ports:
+      - 8081:8080
+    command: ["/cracker-runner", "/plugin.wasm", "say_hello", "8080"]
+    depends_on:
+      image-vulnerability-scan:
+        condition: service_completed_successfully
+      build-local-image:
+        condition: service_completed_successfully
+
+  # Test the endpoint
+  test-endpoint:
+    image: curlimages/curl:latest
+    command: >
+      curl -X POST
+      http://start-function:8080
+      -H 'content-type: text/plain; charset=utf-8'
+      -d '😄 Bob Morane'
+    depends_on:
+      start-function:
+        condition: service_started
+
+  # Stress test the endpoint
+  stress-test:
+    image: ubuntu:22.04
+    command:  
+      - /bin/bash
+      - -c
+      - |  
+        apt-get update 
+        apt-get -y install hey
+        hey -n 1000 -c 10 -m POST -T "text/plain" -d "😄 Bob Morane" http://start-function:8080 > /reports/hey.report.text
+    volumes:
+      - ./reports:/reports
+    depends_on:
+      start-function:
+        condition: service_started
+      test-endpoint:
+        condition: service_completed_successfully
+
+  stop-function:
+    image: docker:cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - /bin/sh
+      - -c
+      - |  
+        echo '🚦 Stopping container named cracker-start-function-1...'
+        docker stop cracker-start-function-1
+      
+    depends_on:
+      stress-test:
+        condition: service_completed_successfully
+
+
+  # Run code analysis on cracker-runner main.go with Docker Model Runner
+  code-analysis:
+    image: golang:1.24.0-alpine
+    environment:
+      - MODEL_RUNNER_BASE_URL=${MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal}
+      - LLM=${LLM:-ai/qwen2.5:latest}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "🔍 Running code analysis..."
+        # Build the analyzer first
+        cd /analyze
+        go mod download
+        go build -o /tmp/analyzer main.go
+        
+        # Run the compiled analyzer binary on the target file
+        /tmp/analyzer /cracker-runner/main.go > /reports/code-analysis-report.txt
+        echo "📊 Code analysis completed. Report saved to /reports/code-analysis-report.txt"
+
+    volumes:
+      - ./analyze:/analyze
+      - ./cracker-runner:/cracker-runner
+      - ./reports:/reports
+    depends_on:
+      build-cracker-runner:
+        condition: service_completed_successfully
