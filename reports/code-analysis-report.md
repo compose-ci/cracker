@@ -1,70 +1,91 @@
-The provided Go code is a simple HTTP server that uses the `extism` and `wazero` packages to run WebAssembly (WASM) plugins. The code aims to serve as a basic framework for a plugin-based system, where the plugins are loaded from a WASM file and can be invoked via HTTP POST requests. Here's an analysis of the code:
+This Go program sets up a simple HTTP server that uses the `extism` Go SDK to run WebAssembly (Wasm) plugins. The code includes a basic structure for handling HTTP requests, storing and retrieving Wasm plugins, and invoking functions within those plugins. Here's an analysis of the code:
 
-### Structure and Organization
+### Key Components
 
 1. **Imports and Constants:**
-   - The code imports necessary packages such as `context`, `errors`, `fmt`, `log`, `net/http`, `os`, and `sync`.
-   - It also imports the `extism` and `wazero` packages, which are used for running WASM plugins.
+   - `context`, `errors`, `fmt`, `log`, `os`, `sync`, and `net/http` for standard Go functionalities.
+   - `extism` and `wazero` for interacting with WebAssembly plugins.
+   - `sync.Mutex` is used to protect the `plugins` map.
 
 2. **Global Variables:**
-   - A `sync.Mutex` and a `map[string]*extism.Plugin` are used to manage the plugins in a thread-safe manner.
-   - The `StorePlugin` function adds a plugin to the map.
-   - The `GetPlugin` function retrieves a plugin from the map.
+   - `plugins` map: Stores references to the WebAssembly plugins.
+   - `StorePlugin` and `GetPlugin` functions for managing the plugins.
 
-3. **Helper Function:**
-   - `GetBytesBody` reads the request body into a byte slice.
+3. **HTTP Handler Function:**
+   - Processes incoming HTTP POST requests.
+   - Retrieves the Wasm function name and parameters.
+   - Locks the `m` mutex to ensure thread safety when accessing the `plugins` map.
+   - Invokes the specified Wasm function with the provided parameters.
 
 4. **Main Function:**
-   - The `main` function is the entry point of the program.
-   - It initializes the HTTP server and sets up the WASM plugin.
-   - It handles HTTP POST requests to invoke the WASM plugin.
+   - Sets up the Wasm plugin.
+   - Configures an HTTP server.
+   - Starts the server and listens for incoming requests.
 
-### Code Analysis
+### Analysis
 
-1. **Command Line Arguments:**
-   - The program expects command line arguments: the path to the WASM file and the name of the WASM function to call.
-   - A default value for the HTTP port is provided if not specified.
+#### Pros:
+1. **Modular and Structured:**
+   - The code is modular and well-structured, making it easier to understand and maintain.
+   - Use of `sync.Mutex` ensures thread safety when accessing the `plugins` map.
 
-2. **Plugin Initialization:**
-   - The `extism.NewPlugin` function is used to load the WASM plugin.
-   - The plugin is stored in the `plugins` map for future use.
+2. **Error Handling:**
+   - Proper error handling is implemented, logging errors and providing appropriate HTTP responses.
+   - Use of `fmt.Println` for logging, which can be improved by using structured logging.
 
-3. **HTTP Server Setup:**
-   - The `http.NewServeMux` is used to create a new HTTP request multiplexer.
-   - An HTTP handler function is defined to handle POST requests to the root URL.
+3. **Flexibility:**
+   - The code can be easily extended to support multiple Wasm plugins by adding more keys to the `plugins` map.
+   - The `GetPlugin` function can be modified to support multiple keys if needed.
 
-4. **Request Handling:**
-   - The `GetBytesBody` function reads the request body into a byte slice.
-   - The `GetPlugin` function is used to retrieve the plugin from the map.
-   - The `pluginInst.Call` function is used to invoke the WASM function with the provided parameters.
-   - The response from the WASM function is written back to the HTTP response.
+#### Cons:
+1. **Inefficient Memory Usage:**
+   - The `plugins` map stores references to the Wasm plugins, which might not be necessary if only one plugin is used. Consider using a more efficient data structure if only one plugin is needed.
 
-5. **Error Handling:**
-   - Error handling is implemented for various parts of the code, such as plugin loading, function invocation, and HTTP response writing.
+2. **Unnecessary Complexity:**
+   - The `StorePlugin` and `GetPlugin` functions are redundant. The `plugins` map can directly return the plugin reference without these functions.
+   - The `GetBytesBody` function is not used in the current implementation and can be removed.
 
-### Potential Improvements and Issues
+3. **Security Concerns:**
+   - The `extism` SDK might have its own mechanisms for managing and securing plugins. Ensure that these mechanisms are properly utilized.
 
-1. **Error Handling:**
-   - The error messages could be more detailed and user-friendly.
-   - Consider using structured error handling with error types and messages.
+4. **Performance:**
+   - The use of a mutex for every plugin retrieval might introduce unnecessary overhead. Consider using a more efficient synchronization mechanism if performance is a concern.
 
-2. **Resource Management:**
-   - Ensure that resources are properly cleaned up, especially in the case of errors.
-   - The `defer` statement to unlock the mutex is correct but could be improved for clarity.
+5. **Code Duplication:**
+   - The `GetPlugin` function can be simplified by directly returning the plugin reference from the `plugins` map.
 
-3. **Security:**
-   - The `AllowedHosts` field is set to `[]string{"*"}`, which allows all hosts. This is a security risk and should be restricted to trusted hosts.
+### Suggested Improvements
 
-4. **Code Duplication:**
-   - The `StorePlugin` and `GetPlugin` functions are simple but could be combined if the plugin management is limited to a single plugin.
+1. **Simplify `StorePlugin` and `GetPlugin`:**
+   ```go
+   var m sync.Mutex
+   var plugins = make(map[string]*extism.Plugin)
 
-5. **Performance:**
-   - The code uses a simple in-memory map for plugin storage. If more plugins need to be managed, consider a more sophisticated storage mechanism.
+   func GetPlugin() (*extism.Plugin, error) {
+       m.Lock()
+       defer m.Unlock()
+       if plugin, ok := plugins["code"]; ok {
+           return plugin, nil
+       }
+       return nil, errors.New("🔴 no plugin")
+   }
+   ```
 
-6. **Logging:**
-   - The logging statements could be more detailed and include more context information for debugging purposes.
+2. **Remove `GetBytesBody` Function:**
+   - It is not used in the current implementation and can be removed.
 
-### Example Improvements
+3. **Refine Error Handling:**
+   - Use structured logging with libraries like `logrus` or `zap` for better log management.
+
+4. **Optimize Mutex Usage:**
+   - If only one plugin is used, consider removing the mutex if it's not necessary.
+
+5. **Code Comments:**
+   - Add comments to explain the purpose of each function and block of code for better readability.
+
+### Final Code
+
+Here's the refined version of the code:
 
 ```go
 package main
@@ -85,37 +106,30 @@ import (
 var m sync.Mutex
 var plugins = make(map[string]*extism.Plugin)
 
-func StorePlugin(plugin *extism.Plugin) {
-	m.Lock()
-	plugins["code"] = plugin
-	m.Unlock()
-}
-
-func GetPlugin() (extism.Plugin, error) {
+func GetPlugin() (*extism.Plugin, error) {
 	m.Lock()
 	defer m.Unlock()
-
 	if plugin, ok := plugins["code"]; ok {
-		return *plugin, nil
-	} else {
-		return extism.Plugin{}, errors.New("🔴 no plugin")
+		return plugin, nil
 	}
-}
-
-func GetBytesBody(r *http.Request) []byte {
-	body := make([]byte, r.ContentLength)
-	if _, err := r.Body.Read(body); err != nil {
-		log.Printf("🔴 Error reading request body: %v", err)
-		return nil
-	}
-	return body
+	return nil, errors.New("🔴 no plugin")
 }
 
 func main() {
 
+	// Test the number of arguments
+	if len(os.Args) < 3 {
+		log.Println("👋 Cracker Runner Demo 🚀")
+		os.Exit(0)
+	}
+
 	wasmFilePath := os.Args[1]
 	wasmFunctionName := os.Args[2]
-	httpPort := "8080"
+
+	httpPort := "8080" // Default value
+	if len(os.Args) > 3 {
+		httpPort = os.Args[3]
+	}
 
 	ctx := context.Background()
 
@@ -129,51 +143,62 @@ func main() {
 			extism.WasmFile{
 				Path: wasmFilePath},
 		},
-		AllowedHosts: []string{"localhost"},
+		AllowedHosts: []string{"*"},
 		Config:       map[string]string{},
 	}
 
-	pluginInst, err := extism.NewPlugin(ctx, manifest, config, nil)
+	pluginInst, err := extism.NewPlugin(ctx, manifest, config, nil) // new
 	if err != nil {
-		log.Fatalf("🔴 !!! Error when loading the plugin: %v", err)
+		log.Println("🔴 !!! Error when loading the plugin", err)
+		os.Exit(1)
 	}
 
-	StorePlugin(pluginInst)
+	plugins["code"] = pluginInst
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		params := GetBytesBody(r)
-		if params == nil {
-			http.Error(w, "😡 Error: Failed to read request body", http.StatusBadRequest)
-			return
-		}
+	mux.HandleFunc("POST /", func(response http.ResponseWriter, request *http.Request) {
+
+		params := []byte{}
+		// params := GetBytesBody(request)
+		// unmarshal the json data
+		// var data map[string]string
+		// err := json.Unmarshal(body, &data)
+		// if err != nil {
+		// 	response.Write([]byte("😡 Error: " + err.Error()))
+		// }
+
+		// model := data["model"]
+		// systemContent := data["system"]
+		// userContent := data["user"]
 
 		m.Lock()
 		defer m.Unlock()
 
 		pluginInst, err := GetPlugin()
+
 		if err != nil {
-			log.Printf("🔴 !!! Error when getting the plugin: %v", err)
-			http.Error(w, "😡 Error: " + err.Error(), http.StatusInternalServerError)
+			log.Println("🔴 !!! Error when getting the plugin", err)
+			response.Write([]byte("😡 Error: " + err.Error()))
 			return
 		}
 
 		_, out, err := pluginInst.Call(wasmFunctionName, params)
-		if err != nil {
-			log.Printf("🔴 !!! Error when invoking the plugin: %v", err)
-			http.Error(w, "😡 Error: " + err.Error(), http.StatusInternalServerError)
-			return
-		}
 
-		w.Write(out)
+		if err != nil {
+			fmt.Println(err)
+			response.Write([]byte("😡 Error: " + err.Error()))
+		} else {
+			response.Write(out)
+		}
 	})
 
-	log.Printf("🌍 http server is listening on: %s", httpPort)
-	if err := http.ListenAndServe(":"+httpPort, mux); err != nil {
-		log.Fatalf("🔴 Error starting HTTP server: %v", err)
-	}
+	var errListening error
+	log.Println("🌍 http server is listening on: " + httpPort)
+	errListening = http.ListenAndServe(":"+httpPort, mux)
+
+	log.Fatal(errListening)
 }
 ```
 
-This version includes better error handling, improved logging, and a more secure default for `AllowedHosts`.
+This version simplifies the `StorePlugin` and `GetPlugin` functions, removes unused code, and improves overall readability.
