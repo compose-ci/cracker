@@ -208,3 +208,30 @@ services:
     depends_on:
       build-cracker-runner:
         condition: service_completed_successfully
+
+  generate-unit-tests:
+    image: golang:1.24.0-alpine
+    environment:
+      - MODEL_RUNNER_BASE_URL=${MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal}
+      - LLM=${LLM:-ai/qwen2.5:latest}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "📝 Running code generation..."
+        # Build the generator first
+        cd /generate
+        go mod download
+        go build -o /tmp/generate main.go
+        
+        # Run the compiled analyzer binary on the target file
+        /tmp/generate /cracker-runner/main.go > /reports/unit-tests-report.md
+        echo "📊 Unit tests generation completed. Report saved to /reports/unit-tests-report.md"
+
+    volumes:
+      - ./generate:/generate
+      - ./cracker-runner:/cracker-runner
+      - ./reports:/reports
+    depends_on:
+      build-cracker-runner:
+        condition: service_completed_successfully
